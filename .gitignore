@@ -1,0 +1,19 @@
+#sensitive files - do NOT push to github
+api_key.txt
+credentials.json
+token.pickle
+
+#python cache
+__pycache__/
+*.pyc
+*.pyo
+
+#ide files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+#os files
+.DS_Store
+Thumbs.db
