@@ -75,7 +75,7 @@ def generate_email(api_key, recipient_name, source_link, additional_context=""):
 
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.0-flash-lite')
+        model = genai.GenerativeModel('gemini-2.0-flash')
 
         prompt = f"""You are an expert academic outreach writer skilled in crafting personalized, professional cold emails for high school students seeking research opportunities.
 
