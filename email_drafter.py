@@ -7,6 +7,12 @@ import base64 #encodes emails into gmail's desired format
 import os #filesystem (local)
 import pickle #saving and loading python objects (e.g. credentials) to files
 from email.mime.text import MIMEText #create properly formatted email messages
+import datetime
+import calendar #for consistent dates in the email
+
+now = datetime.datetime.now()
+current_month = now.month
+current_year = now.year
 
 #config
 SCOPES = ['https://www.googleapis.com/auth/gmail.compose'] #permission to create drafts
@@ -83,13 +89,13 @@ Use the professor's name directly in the greeting and analyze the research sourc
 Write a concise, polite, and well-formatted email using this exact structure:
 
 ---
-Hello [professor's name],
+Hello [Professor Name],
 
 I hope you are having a great day. We recently read about your research on [specific topic from the source link]. We were particularly intrigued by [provide a detailed, two-sentence analysis that demonstrates deep understanding - mention specific methodologies, findings, implications, or applications].
 
 Our names are Pranav Kolli and Ayush Patel, and we are juniors at Arnold O. Beckman High School with a strong interest in conducting research in [related field from the knowledge source]. We both share a deep passion for scientific exploration and have completed rigorous coursework including AP Biology, AP Chemistry, and Human Body Systems.
 
-We would be incredibly grateful for the opportunity to gain research experience under your guidance. We would love to work with you from October of 2025 through our high school graduation in June of 2027.
+We would be incredibly grateful for the opportunity to gain research experience under your guidance. We would love to work with you from {calendar.month_name[current_month]} of {current_year} through our high school graduation in June of 2027.
 
 We would be honored to meet with you to discuss this opportunity further.
 
@@ -136,6 +142,7 @@ def create_gmail_draft(service, recipient_email, body):
     try:
         message = MIMEText(body)
         message['to'] = recipient_email
+        message['cc'] = 'pranavsaikolli@gmail.com'
         message['subject'] = 'Research Opportunity Inquiry'
 
         raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
