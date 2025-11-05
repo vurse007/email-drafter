@@ -15,7 +15,10 @@ current_month = now.month
 current_year = now.year
 
 #config
-SCOPES = ['https://www.googleapis.com/auth/gmail.compose'] #permission to create drafts
+SCOPES = [
+    'https://www.googleapis.com/auth/gmail.compose',
+    'https://www.googleapis.com/auth/spreadsheets.readonly'
+] #permission to create drafts and read a spreadsheet
 API_KEY_FILE = 'api_key.txt'
 TOKEN_FILE = 'token.pickle'
 CREDENTIALS_FILE = 'credentials.json' #stored information to connect accounts and services
@@ -34,7 +37,7 @@ def load_api_key():
         print("api key was saved successfully.")
         return api_key
     
-def connect_gmail():
+def connect_google_services():
     #load existing credentials
     creds = None
     if os.path.exists(TOKEN_FILE):
@@ -56,7 +59,7 @@ def connect_gmail():
                 print("2. APIs & Services > Credentials")
                 print("3. Download OAuth 2.0 Client ID")
                 print(f"4. Save as '{CREDENTIALS_FILE}' in this folder\n")
-                return None
+                return None, None
             
             print("\n opening browser for gmail authentication...")
             flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
@@ -67,7 +70,11 @@ def connect_gmail():
             pickle.dump(creds, token)
         print("connected to gmail successfully.")
 
-    return build('gmail', 'v1', credentials=creds)
+    #build both services
+    gmail_service = build('gmail', 'v1', credentials=creds)
+    sheets_service = build('sheets', 'v4', credentials=creds)
+
+    return gmail_service, sheets_service
 
 def generate_email(api_key, recipient_name, source_link, additional_context=""):
     #generate the email using the gemini api:
@@ -75,7 +82,7 @@ def generate_email(api_key, recipient_name, source_link, additional_context=""):
 
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = genai.GenerativeModel('gemini-2.5-pro')
 
         prompt = f"""You are an expert academic outreach writer skilled in crafting personalized, professional cold emails for high school students seeking research opportunities.
 
@@ -125,7 +132,14 @@ General Guidelines:
 Format the response as plain text ready to copy paste like:
 [email body]"""
 
-        response = model.generate_content(prompt)
+        try:
+            response = model.generate_content(prompt)
+        except genai.RateLimitError as e:
+            print(f"\n free usage exhausted on gemini-2.5-pro: {e}")
+            print("\n proceeding using gemini-2.0-flash...")
+            model = genai.GenerativeModel('gemini-2.0-flash')
+            response = model.generate_content(prompt)
+
         generated_text = response.text
 
         #parse
@@ -136,6 +150,16 @@ Format the response as plain text ready to copy paste like:
     except Exception as e:
         print(f"error generating email: {e}")
         return None
+    
+def read_sheet(service, spreadsheet_id, range_name):
+    #read data from google sheet
+    result = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=range_name
+    ).execute()
+
+    rows = result.get('values', [])
+    return rows #returns a list of lists [['john@...', 'John', 'https://...'], ...]
     
 def create_gmail_draft(service, recipient_email, body):
     #create a draft in gmail
@@ -170,89 +194,136 @@ def main():
 
     #connect to gmail
     print("\n connecting to gmail...")
-    gmail_service = connect_gmail()
+    gmail_service, sheets_service = connect_google_services()
 
-    if not gmail_service:
-        print("failed to connect to gmail. continuing without autodraft.")
+    if not gmail_service or not sheets_service:
+        print("failed to connect to gmail or sheets. continuing without autodraft and autoread.")
         gmail_service = None
+        sheets_service = None
 
-    #main loop
-    while True:
-        print("\n" + "-" * 60)
-        print("enter email details (or quit to exit)")
-        print("-" * 60)
+    sheets_int = input("use google sheets integration? (ENTER for Y, n for N): ").strip().lower()
 
-        #get recipient email
-        recipient_email = input("\nrecipient email: ").strip()
-        if recipient_email.lower() == 'quit':
-            print("user-specified termination")
-            break
-
-        #get recipient name
-        recipient_name = input("recipient name: ").strip()
-        if recipient_name.lower() == 'quit':
-            print("user-specified termination")
-            break
-
-        #get source link
-        source_link = input("research source link: ").strip()
-        if source_link.lower() == 'quit':
-            print("user-specified termination")
-            break
-
-        #get additional context (OPTIONAL)
-        print("optional additional context (press ENTER to skip): ")
-        additional_context = input().strip()
-        if additional_context.lower() == 'quit':
-            print("user-specified termination")
-            break
-
-        #generate email
-        body = generate_email(api_key, recipient_name, source_link, additional_context)
-
-        if not body:
-            continue
-
-        #diplay generated email
-        print("\n" + "-" * 60)
-        print(" generated email")
-        print("-" * 60)
-        print(body)
-        print("-" * 60)
-
-        #next steps
+    if sheets_int == 'n':
+        #main loop - manual input
+        print("\n starting manual input loop...")
         while True:
-            print("\n next steps:")
-            print(" ENTER: create gmail draft")
-            print(" A: regenerate email")
-            print(" B: quit")
+            print("\n" + "-" * 60)
+            print("enter email details (or quit to exit)")
+            print("-" * 60)
 
-            choice = input("> ").strip()
-
-            if choice == '':
-                if gmail_service:
-                    create_gmail_draft(gmail_service, recipient_email, body)
-                    break
-                else:
-                    print("gmail isn't connected - reconnect gmail service to regain access to autodraft.")
-
-            elif choice.lower() == 'a':
-                body = generate_email(api_key, recipient_name, source_link, additional_context)
-                if body:
-                    print("\n" + "-" * 60)
-                    print(" regenerated email")
-                    print("-" * 60)
-                    print(body)
-                    print("-" * 60)
-                else:
-                    break
-
-            elif choice.lower() == 'b':
+            #get recipient email
+            recipient_email = input("\nrecipient email: ").strip()
+            if recipient_email.lower() == 'quit':
                 print("user-specified termination")
-                return
-            
-            else:
-                print("invalid choice - please enter one of the options.")
+                break
+
+            #get recipient name
+            recipient_name = input("recipient name: ").strip()
+            if recipient_name.lower() == 'quit':
+                print("user-specified termination")
+                break
+
+            #get source link
+            source_link = input("research source link: ").strip()
+            if source_link.lower() == 'quit':
+                print("user-specified termination")
+                break
+
+            #get additional context (OPTIONAL)
+            print("optional additional context (press ENTER to skip): ")
+            additional_context = input().strip()
+            if additional_context.lower() == 'quit':
+                print("user-specified termination")
+                break
+
+            #generate email
+            body = generate_email(api_key, recipient_name, source_link, additional_context)
+
+            if not body:
+                continue
+
+            #diplay generated email
+            print("\n" + "-" * 60)
+            print(" generated email")
+            print("-" * 60)
+            print(body)
+            print("-" * 60)
+
+            #next steps
+            while True:
+                print("\n next steps:")
+                print(" ENTER: create gmail draft")
+                print(" A: regenerate email")
+                print(" B: quit")
+
+                choice = input("> ").strip()
+
+                if choice == '':
+                    if gmail_service:
+                        create_gmail_draft(gmail_service, recipient_email, body)
+                        break
+                    else:
+                        print("gmail isn't connected - reconnect gmail service to regain access to autodraft.")
+
+                elif choice.lower() == 'a':
+                    body = generate_email(api_key, recipient_name, source_link, additional_context)
+                    if body:
+                        print("\n" + "-" * 60)
+                        print(" regenerated email")
+                        print("-" * 60)
+                        print(body)
+                        print("-" * 60)
+                    else:
+                        break
+
+                elif choice.lower() == 'b':
+                    print("user-specified termination")
+                    return
+                
+                else:
+                    print("invalid choice - please enter one of the options.")
+    
+    else:
+        print("\n starting google sheets integration...")
+        sheet_id = None
+        if os.path.exists('sheet_id.txt'):
+            with open('sheet_id.txt', 'r') as f:
+                sheet_id = f.read().strip()
+        else:
+            sheet_id = input("enter the google sheet id (the long string in the sheet url): ").strip()
+            with open('sheet_id.txt', 'w') as f:
+                f.write(sheet_id)
+
+        #read all rows from the sheet
+        rows = read_sheet(sheets_service, sheet_id, 'v2!A2:D') #uses sheets_services
+        # v2 (name of sheet tab) ! (separator) A2:D (range - columns A to D, starting from row 2 to skip header)
+
+        drafted_email_count = 0
+
+        for row in rows:
+            if len(row) < 3:
+                print(f"\n skipping incomplete row: {row}")
+                continue
+            recipient_name = row[0].strip() #column A of each row in the list of rows (2d array/nested lists)
+            recipient_email = row[1].strip()  #column B
+            source_link = row[2].strip()     #column C
+            additional_context = row[3].strip() if len(row) >= 4 else "" #column D (optional - may not have data)
+
+            body = generate_email(api_key, recipient_name, source_link, additional_context)
+
+            if not body:
+                continue
+
+            if gmail_service:
+                success = create_gmail_draft(gmail_service, recipient_email, body)
+
+            if success:
+                drafted_email_count += 1
+
+        print(f"\n generated and drafted {drafted_email_count} emails using google sheets integration.")
+        print("data processed and outputs created. exiting...")
+        os._exit(0)
+
 
 
 if __name__ == "__main__":
