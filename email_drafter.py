@@ -134,8 +134,8 @@ Format the response as plain text ready to copy paste like:
 
         try:
             response = model.generate_content(prompt)
-        except genai.RateLimitError as e:
-            print(f"\n free usage exhausted on gemini-2.5-pro: {e}")
+        except Exception as e:
+            print(f"\n error using gemini-2.5-pro: {e}")
             print("\n proceeding using gemini-2.0-flash...")
             model = genai.GenerativeModel('gemini-2.0-flash')
             response = model.generate_content(prompt)
